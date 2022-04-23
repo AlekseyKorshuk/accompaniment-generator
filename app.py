@@ -22,7 +22,7 @@ article = "<p style='text-align: center'>" \
           "<a href='https://github.com/AlekseyKorshuk/accompaniment-generator' target='_blank'>Github Repo</a>" \
           "</p>"
 
-examples = [['examples/barbiegirl_mono.mid', 10]]
+examples = [['barbiegirl_mono.mid', 10]]
 
 gr.Interface(
     inference,

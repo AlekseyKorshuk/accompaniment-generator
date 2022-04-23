@@ -1,3 +1,4 @@
 deap
 tqdm
 gradio
+pretty-midi
