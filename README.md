@@ -2,6 +2,8 @@
 
 Generate accompaniment part with chords using Evolutionary algorithm.
 
+[![Demo](https://i.postimg.cc/Xq7QKDTp/Before-2.png)](https://postimg.cc/34VXY9rT)
+
 # Use with Spaces
 
 Live web app for easiest inference available
