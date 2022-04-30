@@ -1,11 +1,55 @@
-# Global Variables
-import math
 import random
+import numpy as np
+from pretty_midi import Note
+from pychord import find_chords_from_notes
+import pretty_midi
 
-OPTIONS_M = ((0, -3, 5), (0, -3, 5), (0, -4, 5), (0, -3, 6), (0, -3, 5), (0, -4, 5), (0, -4, 5))
-OPTIONS_m = ((0, -4, 5), (0, -4, 5), (0, -3, 5), (0, -3, 5), (0, -4, 5), (0, -3, 6), (0, 5))
-MOD_M = ('M', 'm', 'm', 'M', 'M', 'm', 'd')
-MOD_m = ('m', 'd', 'M', 'm', 'M', 'M', 'M')
+from accompaniment_generator.config.base import major_keys, minor_keys, matcher, chord_types
+
+
+def get_allowed_chords(tonic: str, key: str):
+    if tonic == "major":
+        dict_to_search = major_keys
+    else:
+        dict_to_search = minor_keys
+        key += "m"
+    if key not in dict_to_search:
+        return dict_to_search[matcher[key]]
+    return dict_to_search[key]
+
+
+def get_chord_from_pitches(pitches: list):
+    notes = [pretty_midi.note_number_to_name(pitch) for pitch in pitches]
+    for i, note in enumerate(notes):
+        note_name = ''.join(i for i in note if not i.isdigit())
+        notes[i] = note_name.replace("-", "")
+    result = find_chords_from_notes(notes)
+    return result[0].chord.replace("dim", "o")
+
+
+class Chord:
+
+    def __init__(self, pitches: list, start: float, end: float, velocity: int = 50):
+        self.velocity = velocity
+        self.type = None
+        pitches = sorted(pitches)
+        self.notes = [
+            Note(
+                pitch=pitch, start=start, end=end, velocity=self.velocity
+            ) for pitch in pitches
+        ]
+
+    def get_base_note(self):
+        return self.notes[0].pitch % 12
+
+    def is_note_exist(self, note):
+        for _note in self.notes:
+            if _note.pitch == note:
+                return True
+        return False
+
+    def get_pitches(self):
+        return [note.pitch for note in self.notes]
 
 
 def float_difference(first, second, ndigits=2):
@@ -15,124 +59,51 @@ def float_difference(first, second, ndigits=2):
     )
 
 
-def setTon(line):
-    """Return the tonality of the exercise and the bass notes of it"""
-    ton = line[:2]
-    notes = list(map(int, line[3:].split(' ')))
-    if ton[1] == '#':
-        ton = (int(ton[0]) * 7) % 12
-    else:
-        ton = (int(ton[0]) * 5) % 12
-    for note in notes:
-        if (ton + 6) % 12 == note % 12:
-            ton = str((ton - 3) % 12) + 'm'
-            break
-    else:
-        if ton - 3 == notes[-1] % 12:
-            ton = str((ton - 3) % 12) + 'm'
-        else:
-            ton = str(ton) + 'M'
-    return ton, notes
+def chord_from_params(params):
+    base_note = np.random.randint(
+        params["base_note"]["start"],
+        params["base_note"]["end"],
+    )
+    pitches = [base_note + shift for shift in params["shifts"]]
+    return Chord(pitches, 0, 0, 50)
 
 
-def creatChord(nameC, noteF):
-    """Create one chord given the name of the chord and the fundamental note"""
-    num_funda = int(nameC[:-1])
-    if nameC[-1] == 'M':
-        val_notes = [num_funda, (num_funda + 4) % 12, (num_funda + 7) % 12]
-    elif nameC[-1] == 'm':
-        val_notes = [num_funda, (num_funda + 3) % 12, (num_funda + 7) % 12]
-    elif nameC[-1] == 'd':
-        val_notes = [num_funda, (num_funda + 3) % 12, (num_funda + 6) % 12]
-
-    # Tessitura of each voice
-    tenorR = list(range(48, 69))
-    contR = list(range(52, 77))
-    sopR = list(range(60, 86))
-
-    # Depending in the bass note this are the options for the others voices
-    if noteF % 12 == val_notes[0]:
-        opc = [[1, 1, 1], [2, 1, 0], [0, 1, 2]]
-    elif noteF % 12 == val_notes[1]:
-        opc = [[1, 0, 2], [3, 0, 0], [2, 0, 1]]
-    elif noteF % 12 == val_notes[2]:
-        opc = [[1, 1, 1], [2, 1, 0]]
-    else:
-        opc = [[1, 1, 1], [2, 1, 0], [0, 1, 2]]
-
-    opc = random.choice(opc)
-    chordN = list()
-    for num, val in zip(opc, val_notes):
-        chordN += [val] * num
-
-    random.shuffle(chordN)
-
-    chord = [noteF, ]
-    for nte, voce in zip(chordN, [tenorR, contR, sopR]):
-        posible_n = [x for x in voce if x % 12 == nte]
-        chord.append(random.choice(posible_n))
-
+def get_random_chord() -> Chord:
+    chord_type, params = random.choice(list(chord_types.items()))
+    chord = chord_from_params(params)
+    chord.type = chord_type
     return chord
 
 
-def selChord(ton, notesBass):
-    """Select the chords from all the posibilities"""
-    listaOp = OPTIONS_M if ton[-1] == 'M' else OPTIONS_m
-    listaMod = MOD_M if ton[-1] == 'M' else MOD_m
-    prog = list()
-
-    for note in notesBass:
-        name = note % 12
-        grad = name - int(ton[:-1])
-        grad = math.ceil(((grad + 12) % 12) / 2)
-        num = (random.choice(listaOp[grad]) + name + 12) % 12
-        grad = num - int(ton[:-1])
-        grad = math.ceil(((grad + 12) % 12) / 2)
-        name = '{}{}'.format(num, listaMod[grad])
-        prog.append([creatChord(name, note), grad])
-    return prog
-
-
-def newChordProg(ton, notes):
+def initial_chords(notes, duration=0.96):
     """Create a new individual given the tonality and the base notes"""
-    chords = selChord(ton, notes)
-    for c in chords:
-        yield c
+    num_chords = int(notes[-1].end // duration)
+    for i in range(num_chords):
+        chord = get_random_chord()
+        for note in chord.notes:
+            note.start = i * duration
+            note.end = (i + 1) * duration
+        yield chord
 
 
-def check_interval(chord):
+def get_note_at_time(t, notes):
+    for note in notes[::-1]:
+        if round(note.start, 2) <= t:
+            return note.pitch
+    for note in notes:
+        if round(note.start, 2) <= t < round(note.end, 2):
+            return note.pitch
+    return -1
+
+
+def check_interval(chord: Chord):
     """Return the number of mistakes in the distance between the notes."""
     res = 0
-    if chord[2] - chord[1] > 12 or chord[2] - chord[1] < 0:
+    if chord.notes[2].pitch - chord.notes[1].pitch > 12 or \
+            chord.notes[2].pitch - chord.notes[1].pitch < 0:
         res += 15
-    if chord[3] - chord[2] > 12 or chord[3] - chord[2] < 0:
-        res += 15
-
-    if chord[1] == chord[2] or chord[2] == chord[3]:
+    if chord.notes[1].pitch == chord.notes[2].pitch:
         res += 1.4
-    return res
-
-
-def check_2_chords(ch1, ch2):
-    """Return the number of mistakes in the intervals between 2 chords."""
-    res = 0
-
-    # Check for 5° and 8°
-    ite1 = map(lambda x, y: y - x, ch1[:-1], ch1[1:])
-    ite2 = map(lambda x, y: y - x, ch2[:-1], ch2[1:])
-    for inter1, inter2 in zip(ite1, ite2):
-        if inter1 == 7 and inter2 == 7:
-            res += 15
-        elif inter1 == 0 and inter2 == 0:
-            res += 15
-        elif inter1 == 12 and inter2 == 12:
-            res += 15
-
-    # Check for big intervals, just to make it more "human"
-    for note1, note2 in zip(ch1[1:], ch2[1:]):
-        if abs(note1 - note2) >= 7:  # 7 equals 5° interval
-            res += .7
-
     return res
 
 
@@ -140,7 +111,7 @@ def neighborhood(iterable):
     """Generator gives the prev actual and next."""
     iterator = iter(iterable)
     prev = None
-    item = next(iterator)  # throws StopIteration if empty.
+    item = next(iterator)
     for nex in iterator:
         yield (prev, item, nex)
         prev = item
@@ -148,44 +119,77 @@ def neighborhood(iterable):
     yield (prev, item, None)
 
 
-def evalNumErr(ton, individual):
+def mean_score(individual):
+    pitch_sum = 0
+    for i in individual:
+        pitch_sum += i.notes[0].pitch
+    mean_note = pitch_sum / len(individual)
+    mean_deviation = 0
+    for i in individual:
+        mean_deviation += (i.notes[0].pitch - mean_note) ** 2
+    return (mean_deviation ** 0.5) / 2
+
+
+def evalNumErr(ton, notes, individual):
     """Evaluation function."""
-    res = 0
-    for prev, item, nex in neighborhood(individual):
-        res += check_interval(item[0])
-        if prev == None:
-            if item[1] != 0:
-                res += 6
-            continue
+    score = 0
+    for i, (previous_chord, current_chord, next_chord) in enumerate(neighborhood(individual)):
+        score -= check_interval(current_chord)
+        t = current_chord.notes[0].start  # calculating the current time of the midi
+        if abs(current_chord.notes[0].pitch - get_note_at_time(t, notes)) % 12 == 0:
+            score += 1000
+        # if (current_chord.get_base_note() == get_note_at_time(t, notes) % 12) and (
+        #         current_chord.notes[0].pitch <= get_note_at_time(t, notes)):
+        #     score += 50
+
+        if current_chord.is_note_exist(get_note_at_time(t, notes)):
+            score += 5
+
+        if current_chord.notes[0].pitch - 12 == get_note_at_time(t, notes):
+            score += 25
         else:
-            if prev[1] in [4, 6] and item[1] in [3, 1]:
-                res += 20
-            res += check_2_chords(prev[0], item[0])
-        if nex == None:
-            if item[1] in [1, 2, 3, 4, 5, 6]:
-                res += 6
-    return (res,)
+            score -= 10
+
+        # if previous_chord is not None:
+        # if "suspended" in previous_chord.type and "suspended" in current_chord.type:
+        #     score -= 5
+
+        # if previous_chord.get_pitches() == current_chord.get_pitches():
+        #     score -= 10
+
+        note_name = pretty_midi.note_number_to_name(individual[0].notes[0].pitch)
+        note_name = ''.join(i for i in note_name if not i.isdigit())
+        note_name = note_name.replace("-", "")
+        allowed = get_allowed_chords(ton, note_name)
+        if get_chord_from_pitches(current_chord.get_pitches()) in allowed:
+            score += 30
+        else:
+            score -= 30
+    octaves = [pretty_midi.note_number_to_name(chord.notes[0].pitch)[-1] for chord in individual]
+    score -= len(set(octaves)) * 10
+
+    # types = [chord.type for chord in individual]
+    # score += types.count(ton) * 125
+    # score += (len(individual) - len(set(types))) * 100
+    return score,
+
+
+def mutate_chord(chord):
+    new_chord = get_random_chord()
+    for note in new_chord.notes:
+        note.start = chord.notes[0].start
+        note.end = chord.notes[0].end
+    return new_chord
 
 
 def mutChangeNotes(ton, individual, indpb, toolbox):
     """Mutant function."""
     new_ind = toolbox.clone(individual)
-    for x in range(len(individual[0])):
-        if random.random() < indpb:
-            listaOp = OPTIONS_M if ton[-1] == 'M' else OPTIONS_m
-            listaMod = MOD_M if ton[-1] == 'M' else MOD_m
 
-            note = individual[x][0][0]
-
-            name = note % 12
-            grad = name - int(ton[:-1])
-            grad = math.ceil(((grad + 12) % 12) / 2)
-            num = (random.choice(listaOp[grad]) + name + 12) % 12
-            grad = num - int(ton[:-1])
-            grad = math.ceil(((grad + 12) % 12) / 2)
-            name = '{}{}'.format(num, listaMod[grad])
-
-            new_ind[x] = [creatChord(name, note), grad]
+    # index = random.randint(0, len(individual)-1)
+    # new_ind[index] = mutate_chord(individual[index])
+    for i, chord in enumerate(new_ind):
+        new_ind[i] = mutate_chord(chord)
 
     del new_ind.fitness.values
     return new_ind,

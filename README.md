@@ -34,5 +34,5 @@ from accompaniment_generator.generator.base import Generator
 
 generator = Generator()
 output_midi_data = generator("input.mid", num_epoch=10)
-output_midi_data.write("output.mid")
+output_midi_data[0].write("output.mid")
 ```

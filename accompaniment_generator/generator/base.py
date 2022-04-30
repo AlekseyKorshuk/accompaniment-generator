@@ -1,94 +1,112 @@
-from typing import Tuple, List
+from typing import List
 
 import numpy
 import pretty_midi
 
-from accompaniment_generator.utils.base import float_difference, setTon, newChordProg, evalNumErr, mutChangeNotes
+from accompaniment_generator.utils.base import initial_chords, evalNumErr, mutChangeNotes
 
 from deap import base
 from deap import creator
 from deap import tools
 from deap import algorithms
 import tqdm
+from pretty_midi.pretty_midi import Note
+import copy
+
 
 class Generator:
 
     def preprocess(self,
                    input_midi_data: pretty_midi.PrettyMIDI,
-                   ton: str = "2b"
-                   ) -> Tuple[str, List[int]]:
-        notes = []
-        for note in input_midi_data.instruments[0].notes:
-            for i in range(int((note.end - note.start) // 0.24)):
-                notes.append(str(note.pitch))
-        return setTon(f"{ton} {' '.join(notes)}")
+                   chord_duration: float = None
+                   ) -> List[Note]:
+        self.chord_duration = chord_duration
+        if chord_duration is None:
+            self.chord_duration = input_midi_data.resolution * \
+                                  input_midi_data.get_tempo_changes()[1][0] / 100000 * 2
 
-    def forward(self, ton: str, notes: list, verbose: bool, num_epoch: int) -> list:
+        return input_midi_data.instruments[0].notes
+
+    def forward(self,
+                ton: str,
+                notes: List,
+                verbose: bool,
+                num_epoch: int,
+                mutpb: float,
+                cxpb: float,
+                ngen: float,
+                population_size: int,
+                best_number: int,
+                ) -> List:
         # ========================= GA setup =========================
-        creator.create('FitnessMin', base.Fitness, weights=(-1.0,))
+        creator.create('FitnessMin', base.Fitness, weights=(1.0,))
         creator.create('Individual', list, fitness=creator.FitnessMin)
 
         toolbox = base.Toolbox()
-        toolbox.register('creat_notes', newChordProg, ton, notes)
+        toolbox.register('creat_notes', initial_chords, notes, self.chord_duration)
         toolbox.register('individual', tools.initIterate, creator.Individual,
                          toolbox.creat_notes)
         toolbox.register('population', tools.initRepeat, list, toolbox.individual)
 
-        toolbox.register('evaluate', evalNumErr, ton)
+        toolbox.register('evaluate', evalNumErr, ton, notes)
         toolbox.register('mate', tools.cxOnePoint)
         toolbox.register('mutate', mutChangeNotes, ton, indpb=0.4, toolbox=toolbox)
         toolbox.register('select', tools.selTournament, tournsize=3)
         # =============================================================
 
-        pop = toolbox.population(n=400)
-        hof = tools.HallOfFame(3)
+        pop = toolbox.population(n=population_size)
+        hof = tools.HallOfFame(best_number)
         stats = tools.Statistics(lambda ind: ind.fitness.values)
         stats.register('avg', numpy.mean)
         stats.register('std', numpy.std)
         stats.register('min', numpy.min)
         stats.register('max', numpy.max)
 
-        pop, log = algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.3, ngen=70, stats=stats, halloffame=hof,
+        pop, log = algorithms.eaSimple(pop, toolbox, cxpb=cxpb, mutpb=mutpb, ngen=ngen, stats=stats, halloffame=hof,
                                        verbose=verbose)
         for _ in tqdm.tqdm(range(num_epoch)):
-            # pop = toolbox.population(n=400)
-            pop, log = algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.3, ngen=70, stats=stats, halloffame=hof,
+            pop, log = algorithms.eaSimple(pop, toolbox, cxpb=cxpb, mutpb=mutpb, ngen=ngen, stats=stats, halloffame=hof,
                                            verbose=verbose)
-
-        result = [x[0] for x in hof[0]]
-        # for best in hof:
-        #     print([x[0] for x in best], end='\n============\n')
-        return result
+        return hof
 
     def postprocess(self,
                     input_midi_data: pretty_midi.PrettyMIDI,
                     outputs: list
-                    ) -> pretty_midi.PrettyMIDI:
-        notes = input_midi_data.instruments[0].notes
-        ids = []
-        for i, note in enumerate(notes):
-            if i - 1 >= 0 and \
-                    float_difference(notes[i - 1].end, notes[i - 1].start) < 0.48 and \
-                    i - 1 in ids and \
-                    float_difference(notes[i].end, notes[i].start) < 0.48:
+                    ) -> List[pretty_midi.PrettyMIDI]:
+        output_midi_data = []
+        octaves_unique = []
+        for output in outputs:
+            input_midi_data_temp = copy.deepcopy(input_midi_data)
+            instrument_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
+            instrument = pretty_midi.Instrument(program=instrument_program, name="Accompaniment")
+            octaves = [pretty_midi.note_number_to_name(chord.notes[0].pitch) for chord in output]
+            if octaves in octaves_unique:
                 continue
-            ids.append(i)
+            print(*octaves)
+            print(*[chord.type for chord in output])
+            for chord in output:
+                for note in chord.notes:
+                    instrument.notes.append(note)
+            input_midi_data_temp.instruments.append(instrument)
+            # input_midi_data_temp.instruments[0].notes += instrument.notes
+            output_midi_data.append(input_midi_data_temp)
+            octaves_unique.append(octaves)
+        return output_midi_data
 
-        instrument_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
-        instrument = pretty_midi.Instrument(program=instrument_program, name="Accompaniment")
-        for id in ids:
-            if len(outputs) <= id:
-                break
-            note = input_midi_data.instruments[0].notes[id]
-            for chord_note in outputs[id]:
-                new_note = pretty_midi.Note(velocity=50, pitch=chord_note, start=note.start, end=note.start + 0.48)
-                instrument.notes.append(new_note)
-        input_midi_data.instruments.append(instrument)
-        return input_midi_data
-
-    def __call__(self, midi_file_path: str, ton: str = "2b", verbose: bool = False, num_epoch: int = 10):
+    def __call__(self,
+                 midi_file_path: str,
+                 tonic: str = "minor",
+                 verbose: bool = False,
+                 num_epoch: int = 10,
+                 chord_duration: float = None,
+                 mutpb: float = 0.3,
+                 cxpb: float = 0.5,
+                 ngen: float = 40,
+                 population_size: int = 400,
+                 best_number: int = 3
+                 ) -> List[pretty_midi.PrettyMIDI]:
         input_midi_data = pretty_midi.PrettyMIDI(midi_file_path)
-        ton, notes = self.preprocess(input_midi_data, ton)
-        outputs = self.forward(ton, notes, verbose, num_epoch)
+        notes = self.preprocess(input_midi_data, chord_duration)
+        outputs = self.forward(tonic, notes, verbose, num_epoch, mutpb, cxpb, ngen, population_size, best_number)
         output_midi_data = self.postprocess(input_midi_data, outputs)
         return output_midi_data
