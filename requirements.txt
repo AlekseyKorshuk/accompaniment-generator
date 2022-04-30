@@ -2,3 +2,8 @@ deap
 tqdm
 pretty-midi
 pychord
+streamlit
+midi2audio
+setuptools
+mido
+numpy

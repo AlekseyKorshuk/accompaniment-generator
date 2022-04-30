@@ -1,13 +1,21 @@
 import random
+from typing import List, Any
 import numpy as np
+from click import Tuple
+from deap import base
 from pretty_midi import Note
 from pychord import find_chords_from_notes
 import pretty_midi
-
 from accompaniment_generator.config.base import major_keys, minor_keys, matcher, chord_types
 
 
-def get_allowed_chords(tonic: str, key: str):
+def get_allowed_chords(tonic: str, key: str) -> List[str]:
+    """
+    Return allowed chords
+    :param tonic: Tonic of the music
+    :param key: Key chord
+    :return: List of allowed chords
+    """
     if tonic == "major":
         dict_to_search = major_keys
     else:
@@ -18,7 +26,12 @@ def get_allowed_chords(tonic: str, key: str):
     return dict_to_search[key]
 
 
-def get_chord_from_pitches(pitches: list):
+def get_chord_from_pitches(pitches: List[int]) -> str:
+    """
+    Returns chord from list of pitches
+    :param pitches: List of pitches
+    :return: Chord name
+    """
     notes = [pretty_midi.note_number_to_name(pitch) for pitch in pitches]
     for i, note in enumerate(notes):
         note_name = ''.join(i for i in note if not i.isdigit())
@@ -29,7 +42,14 @@ def get_chord_from_pitches(pitches: list):
 
 class Chord:
 
-    def __init__(self, pitches: list, start: float, end: float, velocity: int = 50):
+    def __init__(self, pitches: List[int], start: float, end: float, velocity: int = 50):
+        """
+        Chord constructor
+        :param pitches: List of pitches
+        :param start: Starting time
+        :param end: Ending time
+        :param velocity: Velocity of the chord
+        """
         self.velocity = velocity
         self.type = None
         pitches = sorted(pitches)
@@ -40,26 +60,51 @@ class Chord:
         ]
 
     def get_base_note(self):
+        """
+        Returns base note of the chord
+        :return: Base note
+        """
         return self.notes[0].pitch % 12
 
-    def is_note_exist(self, note):
+    def is_note_exist(self, note: Note) -> bool:
+        """
+        Returns whenever note is in the chord
+        :param note: Note
+        :return: True if exists, otherwise False
+        """
         for _note in self.notes:
             if _note.pitch == note:
                 return True
         return False
 
-    def get_pitches(self):
+    def get_pitches(self) -> List[int]:
+        """
+        Returns list of chord pitches
+        :return: List of chord pitches
+        """
         return [note.pitch for note in self.notes]
 
 
-def float_difference(first, second, ndigits=2):
+def float_difference(first, second, ndigits=2) -> float:
+    """
+    Returns difference of two float values
+    :param first: First float valur
+    :param second: Second float value
+    :param ndigits: Number of digits to round
+    :return: Float difference
+    """
     return round(
         round(first, ndigits) - round(second, ndigits)
         , ndigits
     )
 
 
-def chord_from_params(params):
+def chord_from_params(params: dict) -> Chord:
+    """
+    Returns Chord based on parameters
+    :param params: Parameters as dict
+    :return: Chord
+    """
     base_note = np.random.randint(
         params["base_note"]["start"],
         params["base_note"]["end"],
@@ -69,14 +114,23 @@ def chord_from_params(params):
 
 
 def get_random_chord() -> Chord:
+    """
+    Returns random Chord
+    :return: Chord
+    """
     chord_type, params = random.choice(list(chord_types.items()))
     chord = chord_from_params(params)
     chord.type = chord_type
     return chord
 
 
-def initial_chords(notes, duration=0.96):
-    """Create a new individual given the tonality and the base notes"""
+def initial_chords(notes: List[Note], duration: float = 0.96):
+    """
+    Create a new individual given its notes and duration
+    :param notes: Notes
+    :param duration: Chord duration
+    :return: Yield chord
+    """
     num_chords = int(notes[-1].end // duration)
     for i in range(num_chords):
         chord = get_random_chord()
@@ -86,7 +140,13 @@ def initial_chords(notes, duration=0.96):
         yield chord
 
 
-def get_note_at_time(t, notes):
+def get_note_at_time(t: float, notes: List[Note]) -> int:
+    """
+    Returns note pitch that plays at input time
+    :param t: Time
+    :param notes: List of notes
+    :return: Note pitch if such note exists, else -1
+    """
     for note in notes[::-1]:
         if round(note.start, 2) <= t:
             return note.pitch
@@ -96,8 +156,12 @@ def get_note_at_time(t, notes):
     return -1
 
 
-def check_interval(chord: Chord):
-    """Return the number of mistakes in the distance between the notes."""
+def check_interval(chord: Chord) -> float:
+    """
+    Return the number of mistakes in the distance between the notes
+    :param chord: Input Chord
+    :return: Resulting score
+    """
     res = 0
     if chord.notes[2].pitch - chord.notes[1].pitch > 12 or \
             chord.notes[2].pitch - chord.notes[1].pitch < 0:
@@ -107,8 +171,12 @@ def check_interval(chord: Chord):
     return res
 
 
-def neighborhood(iterable):
-    """Generator gives the prev actual and next."""
+def neighborhood(iterable: Any):
+    """
+    Generator gives the prev actual and next
+    :param iterable: Iterable list of chords
+    :return: Yield tuple of previous, current and next chords
+    """
     iterator = iter(iterable)
     prev = None
     item = next(iterator)
@@ -119,20 +187,15 @@ def neighborhood(iterable):
     yield (prev, item, None)
 
 
-def mean_score(individual):
-    pitch_sum = 0
-    for i in individual:
-        pitch_sum += i.notes[0].pitch
-    mean_note = pitch_sum / len(individual)
-    mean_deviation = 0
-    for i in individual:
-        mean_deviation += (i.notes[0].pitch - mean_note) ** 2
-    return (mean_deviation ** 0.5) / 2
-
-
-def evalNumErr(ton, notes, individual):
-    """Evaluation function."""
-    score = 0
+def evaluate(tonic: str, notes: List[Note], individual: List[Chord]) -> List[float]:
+    """
+    Evaluation function
+    :param tonic: Tonic of the music
+    :param notes: List of notes
+    :param individual: List of chords
+    :return: Score
+    """
+    score = 0.0
     for i, (previous_chord, current_chord, next_chord) in enumerate(neighborhood(individual)):
         score -= check_interval(current_chord)
         t = current_chord.notes[0].start  # calculating the current time of the midi
@@ -160,7 +223,7 @@ def evalNumErr(ton, notes, individual):
         note_name = pretty_midi.note_number_to_name(individual[0].notes[0].pitch)
         note_name = ''.join(i for i in note_name if not i.isdigit())
         note_name = note_name.replace("-", "")
-        allowed = get_allowed_chords(ton, note_name)
+        allowed = get_allowed_chords(tonic, note_name)
         if get_chord_from_pitches(current_chord.get_pitches()) in allowed:
             score += 30
         else:
@@ -168,13 +231,15 @@ def evalNumErr(ton, notes, individual):
     octaves = [pretty_midi.note_number_to_name(chord.notes[0].pitch)[-1] for chord in individual]
     score -= len(set(octaves)) * 10
 
-    # types = [chord.type for chord in individual]
-    # score += types.count(ton) * 125
-    # score += (len(individual) - len(set(types))) * 100
     return score,
 
 
-def mutate_chord(chord):
+def mutate_chord(chord) -> Chord:
+    """
+    Returns new mutated chord based on the given
+    :param chord: Chord to mutate
+    :return: Resulting chord
+    """
     new_chord = get_random_chord()
     for note in new_chord.notes:
         note.start = chord.notes[0].start
@@ -182,12 +247,14 @@ def mutate_chord(chord):
     return new_chord
 
 
-def mutChangeNotes(ton, individual, indpb, toolbox):
-    """Mutant function."""
+def individual_mutation(individual: List[Chord], toolbox: base.Toolbox) -> List[Any]:
+    """
+    Mutant function
+    :param individual: List of chords
+    :param toolbox: Toolbox for evolution
+    :return: New individual
+    """
     new_ind = toolbox.clone(individual)
-
-    # index = random.randint(0, len(individual)-1)
-    # new_ind[index] = mutate_chord(individual[index])
     for i, chord in enumerate(new_ind):
         new_ind[i] = mutate_chord(chord)
 

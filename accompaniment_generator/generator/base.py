@@ -1,10 +1,7 @@
 from typing import List
-
 import numpy
 import pretty_midi
-
-from accompaniment_generator.utils.base import initial_chords, evalNumErr, mutChangeNotes
-
+from accompaniment_generator.utils.base import initial_chords, evaluate, individual_mutation, Chord
 from deap import base
 from deap import creator
 from deap import tools
@@ -15,11 +12,26 @@ import copy
 
 
 class Generator:
+    """
+    Generator class to create accompaniments with Evolutionary algorithm
+    """
+
+    def __init__(self):
+        """
+        Generator constructor
+        """
+        self.chord_duration = None
 
     def preprocess(self,
                    input_midi_data: pretty_midi.PrettyMIDI,
                    chord_duration: float = None
                    ) -> List[Note]:
+        """
+        Preprocessing data to forward
+        :param input_midi_data: Input MIDI data as PrettyMIDI
+        :param chord_duration: Custom chord duration
+        :return: List of Notes
+        """
         self.chord_duration = chord_duration
         if chord_duration is None:
             self.chord_duration = input_midi_data.resolution * \
@@ -28,8 +40,8 @@ class Generator:
         return input_midi_data.instruments[0].notes
 
     def forward(self,
-                ton: str,
-                notes: List,
+                tonic: str,
+                notes: List[Note],
                 verbose: bool,
                 num_epoch: int,
                 mutpb: float,
@@ -37,7 +49,20 @@ class Generator:
                 ngen: float,
                 population_size: int,
                 best_number: int,
-                ) -> List:
+                ) -> tools.HallOfFame:
+        """
+        Generates accompaniment based on input data
+        :param tonic: Tonic of the music
+        :param notes: List of Notes
+        :param verbose: Whenever to log the process
+        :param num_epoch: Number of epoch to train
+        :param mutpb: The probability of mutating an individual.
+        :param cxpb: The probability of mating two individuals.
+        :param ngen: The number of generation.
+        :param population_size: Size of the population
+        :param best_number: Number of the best accompaniments to store
+        :return: Hall of fame with the best individuals
+        """
         # ========================= GA setup =========================
         creator.create('FitnessMin', base.Fitness, weights=(1.0,))
         creator.create('Individual', list, fitness=creator.FitnessMin)
@@ -48,9 +73,9 @@ class Generator:
                          toolbox.creat_notes)
         toolbox.register('population', tools.initRepeat, list, toolbox.individual)
 
-        toolbox.register('evaluate', evalNumErr, ton, notes)
+        toolbox.register('evaluate', evaluate, tonic, notes)
         toolbox.register('mate', tools.cxOnePoint)
-        toolbox.register('mutate', mutChangeNotes, ton, indpb=0.4, toolbox=toolbox)
+        toolbox.register('mutate', individual_mutation, toolbox=toolbox)
         toolbox.register('select', tools.selTournament, tournsize=3)
         # =============================================================
 
@@ -71,8 +96,14 @@ class Generator:
 
     def postprocess(self,
                     input_midi_data: pretty_midi.PrettyMIDI,
-                    outputs: list
+                    outputs: tools.HallOfFame
                     ) -> List[pretty_midi.PrettyMIDI]:
+        """
+        Postprocessing of the resulting accompaniment
+        :param input_midi_data: Input MIDI data as PrettyMIDI
+        :param outputs: Hall of fame with the best individuals
+        :return: List of resulting MIDI data
+        """
         output_midi_data = []
         octaves_unique = []
         for output in outputs:
@@ -105,6 +136,20 @@ class Generator:
                  population_size: int = 400,
                  best_number: int = 3
                  ) -> List[pretty_midi.PrettyMIDI]:
+        """
+        Call to generate accompaniment
+        :param midi_file_path: File name or path to MIDI file
+        :param tonic: Tonic of the music
+        :param notes: List of Notes
+        :param verbose: Whenever to log the process
+        :param num_epoch: Number of epoch to train
+        :param mutpb: The probability of mutating an individual.
+        :param cxpb: The probability of mating two individuals.
+        :param ngen: The number of generation.
+        :param population_size: Size of the population
+        :param best_number: Number of the best accompaniments to store
+        :return: List of resulting MIDI data
+        """
         input_midi_data = pretty_midi.PrettyMIDI(midi_file_path)
         notes = self.preprocess(input_midi_data, chord_duration)
         outputs = self.forward(tonic, notes, verbose, num_epoch, mutpb, cxpb, ngen, population_size, best_number)
