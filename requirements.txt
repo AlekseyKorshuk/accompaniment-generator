@@ -7,3 +7,4 @@ midi2audio
 setuptools
 mido
 numpy
+music21

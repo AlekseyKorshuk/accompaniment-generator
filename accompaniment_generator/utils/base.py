@@ -1,7 +1,6 @@
 import random
 from typing import List, Any
 import numpy as np
-from click import Tuple
 from deap import base
 from pretty_midi import Note
 from pychord import find_chords_from_notes
@@ -187,49 +186,39 @@ def neighborhood(iterable: Any):
     yield (prev, item, None)
 
 
-def evaluate(tonic: str, notes: List[Note], individual: List[Chord]) -> List[float]:
+def evaluate(tonic: str, notes: List[Note], tonic_value: str, individual: List[Chord]) -> List[float]:
     """
     Evaluation function
     :param tonic: Tonic of the music
     :param notes: List of notes
+    :param tonic_value: Tonic key value
     :param individual: List of chords
     :return: Score
     """
     score = 0.0
+    allowed = get_allowed_chords(tonic, tonic_value)
+
     for i, (previous_chord, current_chord, next_chord) in enumerate(neighborhood(individual)):
         score -= check_interval(current_chord)
         t = current_chord.notes[0].start  # calculating the current time of the midi
-        if abs(current_chord.notes[0].pitch - get_note_at_time(t, notes)) % 12 == 0:
+        if abs(current_chord.notes[0].pitch - get_note_at_time(t, notes)) % 12 == 0 and abs(
+                current_chord.notes[0].pitch - get_note_at_time(t, notes)) / 12 == 2:
             score += 1000
-        # if (current_chord.get_base_note() == get_note_at_time(t, notes) % 12) and (
-        #         current_chord.notes[0].pitch <= get_note_at_time(t, notes)):
-        #     score += 50
-
-        if current_chord.is_note_exist(get_note_at_time(t, notes)):
-            score += 5
 
         if current_chord.notes[0].pitch - 12 == get_note_at_time(t, notes):
             score += 25
         else:
             score -= 10
 
-        # if previous_chord is not None:
-        # if "suspended" in previous_chord.type and "suspended" in current_chord.type:
-        #     score -= 5
-
-        # if previous_chord.get_pitches() == current_chord.get_pitches():
-        #     score -= 10
-
-        note_name = pretty_midi.note_number_to_name(individual[0].notes[0].pitch)
-        note_name = ''.join(i for i in note_name if not i.isdigit())
-        note_name = note_name.replace("-", "")
-        allowed = get_allowed_chords(tonic, note_name)
         if get_chord_from_pitches(current_chord.get_pitches()) in allowed:
             score += 30
         else:
             score -= 30
     octaves = [pretty_midi.note_number_to_name(chord.notes[0].pitch)[-1] for chord in individual]
-    score -= len(set(octaves)) * 10
+    score -= len(set(octaves)) * 100
+
+    if individual[0].get_pitches() == individual[-1].get_pitches():
+        score += 100
 
     return score,
 
@@ -255,8 +244,7 @@ def individual_mutation(individual: List[Chord], toolbox: base.Toolbox) -> List[
     :return: New individual
     """
     new_ind = toolbox.clone(individual)
-    for i, chord in enumerate(new_ind):
-        new_ind[i] = mutate_chord(chord)
-
+    index = random.randint(0, len(new_ind) - 1)
+    new_ind[index] = mutate_chord(new_ind[index])
     del new_ind.fitness.values
     return new_ind,

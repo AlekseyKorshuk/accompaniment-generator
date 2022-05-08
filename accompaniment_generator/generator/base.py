@@ -1,4 +1,5 @@
 from typing import List
+import music21.stream
 import numpy
 import pretty_midi
 from accompaniment_generator.utils.base import initial_chords, evaluate, individual_mutation, Chord
@@ -9,6 +10,7 @@ from deap import algorithms
 import tqdm
 from pretty_midi.pretty_midi import Note
 import copy
+from music21 import converter
 
 
 class Generator:
@@ -23,21 +25,24 @@ class Generator:
         self.chord_duration = None
 
     def preprocess(self,
+                   music21_score: music21.stream.Stream,
                    input_midi_data: pretty_midi.PrettyMIDI,
                    chord_duration: float = None
-                   ) -> List[Note]:
+                   ):
         """
         Preprocessing data to forward
+        :param music21_score: Score by Music21
         :param input_midi_data: Input MIDI data as PrettyMIDI
         :param chord_duration: Custom chord duration
-        :return: List of Notes
+        :return: List of Notes, Tonic and Tonic name
         """
         self.chord_duration = chord_duration
         if chord_duration is None:
             self.chord_duration = input_midi_data.resolution * \
                                   input_midi_data.get_tempo_changes()[1][0] / 100000 * 2
 
-        return input_midi_data.instruments[0].notes
+        key = music21_score.analyze('key')
+        return input_midi_data.instruments[0].notes, key.tonic.name, key.mode
 
     def forward(self,
                 tonic: str,
@@ -49,6 +54,7 @@ class Generator:
                 ngen: float,
                 population_size: int,
                 best_number: int,
+                tonic_value: str
                 ) -> tools.HallOfFame:
         """
         Generates accompaniment based on input data
@@ -61,6 +67,7 @@ class Generator:
         :param ngen: The number of generation.
         :param population_size: Size of the population
         :param best_number: Number of the best accompaniments to store
+        :param tonic_value: Tonic key value
         :return: Hall of fame with the best individuals
         """
         # ========================= GA setup =========================
@@ -73,7 +80,7 @@ class Generator:
                          toolbox.creat_notes)
         toolbox.register('population', tools.initRepeat, list, toolbox.individual)
 
-        toolbox.register('evaluate', evaluate, tonic, notes)
+        toolbox.register('evaluate', evaluate, tonic, notes, tonic_value)
         toolbox.register('mate', tools.cxOnePoint)
         toolbox.register('mutate', individual_mutation, toolbox=toolbox)
         toolbox.register('select', tools.selTournament, tournsize=3)
@@ -113,10 +120,10 @@ class Generator:
             octaves = [pretty_midi.note_number_to_name(chord.notes[0].pitch) for chord in output]
             if octaves in octaves_unique:
                 continue
-            print(*octaves)
-            print(*[chord.type for chord in output])
-            for chord in output:
+            for i, chord in enumerate(output):
                 for note in chord.notes:
+                    if i == len(output) - 1:
+                        note.end = input_midi_data.get_end_time()
                     instrument.notes.append(note)
             input_midi_data_temp.instruments.append(instrument)
             # input_midi_data_temp.instruments[0].notes += instrument.notes
@@ -126,7 +133,6 @@ class Generator:
 
     def __call__(self,
                  midi_file_path: str,
-                 tonic: str = "minor",
                  verbose: bool = False,
                  num_epoch: int = 10,
                  chord_duration: float = None,
@@ -139,7 +145,6 @@ class Generator:
         """
         Call to generate accompaniment
         :param midi_file_path: File name or path to MIDI file
-        :param tonic: Tonic of the music
         :param notes: List of Notes
         :param verbose: Whenever to log the process
         :param num_epoch: Number of epoch to train
@@ -151,7 +156,9 @@ class Generator:
         :return: List of resulting MIDI data
         """
         input_midi_data = pretty_midi.PrettyMIDI(midi_file_path)
-        notes = self.preprocess(input_midi_data, chord_duration)
-        outputs = self.forward(tonic, notes, verbose, num_epoch, mutpb, cxpb, ngen, population_size, best_number)
+        music21_score = converter.parse(midi_file_path)
+        notes, tonic_value, tonic = self.preprocess(music21_score, input_midi_data, chord_duration)
+        outputs = self.forward(tonic, notes, verbose, num_epoch, mutpb, cxpb, ngen, population_size, best_number,
+                               tonic_value)
         output_midi_data = self.postprocess(input_midi_data, outputs)
         return output_midi_data
